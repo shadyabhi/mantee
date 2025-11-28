@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(./mantee:*)",
+      "Bash(./mantee grep:*)",
+      "Bash(timeout 2 ./mantee:*)",
+      "Bash(cat:*)",
+      "Bash(od:*)",
+      "Bash(MANWIDTH=80 man:*)",
+      "Bash(col:*)",
+      "Bash(go test:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
