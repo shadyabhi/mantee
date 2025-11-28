@@ -12,8 +12,9 @@ import (
 type ViewerMode int
 
 const (
-	ModeNormal ViewerMode = iota // Normal viewing mode
-	ModeSearch                   // Search/command input mode
+	ModeNormal        ViewerMode = iota // Normal viewing mode
+	ModeSearch                          // Search/command input mode
+	ModeSectionSelect                   // Section selector modal
 )
 
 // SearchType represents what field to search in
@@ -30,8 +31,9 @@ const (
 type FocusPane int
 
 const (
-	PaneSidebar FocusPane = iota // Left sidebar with section list
-	PaneContent                  // Right content pane
+	PaneSidebar  FocusPane = iota // Left sidebar with options list
+	PaneContent                   // Center content pane
+	PaneSections                  // Right sidebar with man sections
 )
 
 // Viewer is the Bubble Tea model for the man page viewer
@@ -52,6 +54,9 @@ type Viewer struct {
 	width               int
 	height              int
 	quitting            bool
+	// Section selector state
+	sectionCursor       int // Current selection in section selector modal
+	sectionScrollOffset int // Scroll offset for section selector
 }
 
 // NewViewer creates a new Viewer for the given man page
@@ -84,6 +89,8 @@ func (v Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v.updateNormal(msg)
 		case ModeSearch:
 			return v.updateSearch(msg)
+		case ModeSectionSelect:
+			return v.updateSectionSelect(msg)
 		}
 	}
 	return v, nil
@@ -97,10 +104,13 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return v, tea.Quit
 
 	case "tab":
-		// Switch between panes
-		if v.focusPane == PaneSidebar {
+		// Cycle through panes: Sidebar -> Content -> Sections -> Sidebar
+		switch v.focusPane {
+		case PaneSidebar:
 			v.focusPane = PaneContent
-		} else {
+		case PaneContent:
+			v.focusPane = PaneSections
+		case PaneSections:
 			v.focusPane = PaneSidebar
 		}
 		return v, nil
@@ -165,13 +175,26 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			v.focusPane = PaneContent
 		}
 		return v, nil
+
+	case "g":
+		// Open section selector modal
+		if len(v.content.ManSections) > 0 {
+			v.mode = ModeSectionSelect
+			v.sectionCursor = 0
+			v.sectionScrollOffset = 0
+		}
+		return v, nil
 	}
 
 	// Pane-specific keys
-	if v.focusPane == PaneSidebar {
+	switch v.focusPane {
+	case PaneSidebar:
 		return v.updateSidebar(msg)
+	case PaneSections:
+		return v.updateSections(msg)
+	default:
+		return v.updateContent(msg)
 	}
-	return v.updateContent(msg)
 }
 
 func (v Viewer) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -211,12 +234,12 @@ func (v Viewer) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		v.focusPane = PaneContent
 		return v, nil
 
-	case "home", "g":
+	case "home":
 		v.sidebarCursor = 0
 		v.sidebarScrollOffset = 0
 		return v, nil
 
-	case "end", "G":
+	case "G":
 		v.sidebarCursor = len(displayedIndices) - 1
 		v.adjustSidebarScroll()
 		return v, nil
@@ -270,11 +293,11 @@ func (v Viewer) updateContent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
-	case "home", "g":
+	case "home":
 		v.scrollOffset = 0
 		return v, nil
 
-	case "end", "G":
+	case "G":
 		maxScroll := len(v.content.Lines) - v.viewportHeight()
 		if maxScroll < 0 {
 			maxScroll = 0
@@ -285,6 +308,62 @@ func (v Viewer) updateContent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "h":
 		// Switch to sidebar
 		v.focusPane = PaneSidebar
+		return v, nil
+
+	case "right", "l":
+		// Switch to sections pane
+		v.focusPane = PaneSections
+		return v, nil
+	}
+	return v, nil
+}
+
+// updateSections handles key events for the sections pane (right sidebar)
+func (v Viewer) updateSections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	sections := v.content.ManSections
+	if len(sections) == 0 {
+		return v, nil
+	}
+
+	// Use sectionCursor for navigation in sections pane
+	switch msg.String() {
+	case "up", "k":
+		if v.sectionCursor > 0 {
+			v.sectionCursor--
+		}
+		return v, nil
+
+	case "down", "j":
+		if v.sectionCursor < len(sections)-1 {
+			v.sectionCursor++
+		}
+		return v, nil
+
+	case "enter", "l":
+		// Jump to selected section
+		section := sections[v.sectionCursor]
+		v.scrollOffset = section.StartLine
+		maxScroll := len(v.content.Lines) - v.viewportHeight()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if v.scrollOffset > maxScroll {
+			v.scrollOffset = maxScroll
+		}
+		v.focusPane = PaneContent
+		return v, nil
+
+	case "home":
+		v.sectionCursor = 0
+		return v, nil
+
+	case "G":
+		v.sectionCursor = len(sections) - 1
+		return v, nil
+
+	case "left", "h":
+		// Switch to content pane
+		v.focusPane = PaneContent
 		return v, nil
 	}
 	return v, nil
@@ -341,6 +420,89 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 	}
+}
+
+func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	sections := v.content.ManSections
+	if len(sections) == 0 {
+		v.mode = ModeNormal
+		return v, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		v.quitting = true
+		return v, tea.Quit
+
+	case "esc", "g":
+		// Close section selector
+		v.mode = ModeNormal
+		return v, nil
+
+	case "up", "k":
+		if v.sectionCursor > 0 {
+			v.sectionCursor--
+			v.adjustSectionScroll()
+		}
+		return v, nil
+
+	case "down", "j":
+		if v.sectionCursor < len(sections)-1 {
+			v.sectionCursor++
+			v.adjustSectionScroll()
+		}
+		return v, nil
+
+	case "enter", "l":
+		// Jump to selected section
+		section := sections[v.sectionCursor]
+		v.scrollOffset = section.StartLine
+		maxScroll := len(v.content.Lines) - v.viewportHeight()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if v.scrollOffset > maxScroll {
+			v.scrollOffset = maxScroll
+		}
+		v.mode = ModeNormal
+		v.focusPane = PaneContent
+		return v, nil
+
+	case "home":
+		v.sectionCursor = 0
+		v.sectionScrollOffset = 0
+		return v, nil
+
+	case "end", "G":
+		v.sectionCursor = len(sections) - 1
+		v.adjustSectionScroll()
+		return v, nil
+	}
+	return v, nil
+}
+
+// adjustSectionScroll ensures the section cursor is visible in the modal
+func (v *Viewer) adjustSectionScroll() {
+	modalHeight := v.sectionModalHeight()
+	if v.sectionCursor < v.sectionScrollOffset {
+		v.sectionScrollOffset = v.sectionCursor
+	} else if v.sectionCursor >= v.sectionScrollOffset+modalHeight {
+		v.sectionScrollOffset = v.sectionCursor - modalHeight + 1
+	}
+}
+
+// sectionModalHeight returns the number of visible items in the section modal
+func (v Viewer) sectionModalHeight() int {
+	// Modal takes about half the screen height, minus borders
+	maxHeight := v.height/2 - 4
+	if maxHeight < 5 {
+		maxHeight = 5
+	}
+	numSections := len(v.content.ManSections)
+	if numSections < maxHeight {
+		return numSections
+	}
+	return maxHeight
 }
 
 // findMatchingSections returns indices of sections matching the current search query
@@ -479,9 +641,37 @@ func (v Viewer) getDisplayedSectionIndices() []int {
 	return nil
 }
 
+// sectionsPaneWidth returns the width of the right sections pane
+func (v Viewer) sectionsPaneWidth() int {
+	return 22
+}
+
+// currentManSectionIndex returns the index of the man section currently visible
+// based on the scroll position (returns -1 if no sections)
+func (v Viewer) currentManSectionIndex() int {
+	sections := v.content.ManSections
+	if len(sections) == 0 {
+		return -1
+	}
+
+	// Find which section contains the current scroll position
+	currentLine := v.scrollOffset
+	currentIdx := 0
+
+	for i, section := range sections {
+		if section.StartLine <= currentLine {
+			currentIdx = i
+		} else {
+			break
+		}
+	}
+
+	return currentIdx
+}
+
 // contentWidth returns the width of the content pane
 func (v Viewer) contentWidth() int {
-	return v.width - v.sidebarWidth() - 1 // -1 for border
+	return v.width - v.sidebarWidth() - v.sectionsPaneWidth() - 2 // -2 for borders
 }
 
 // truncateOption truncates an option string to fit in the sidebar
@@ -499,15 +689,27 @@ func truncateOption(opt string, maxWidth int) string {
 func (v Viewer) renderSidebar() string {
 	var b strings.Builder
 	sidebarW := v.sidebarWidth()
-	vpHeight := v.viewportHeight()
+	vpHeight := v.viewportHeight() - 1 // -1 for title
 
 	// Sidebar styles
-	var borderColor lipgloss.Color
+	var borderColor, titleBg lipgloss.Color
 	if v.focusPane == PaneSidebar {
 		borderColor = lipgloss.Color("212") // Pink when focused
+		titleBg = lipgloss.Color("62")      // Brighter purple when focused
 	} else {
 		borderColor = lipgloss.Color("241") // Gray when not focused
+		titleBg = lipgloss.Color("238")     // Dark gray when not focused
 	}
+
+	// Title bar
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Background(titleBg).
+		Width(sidebarW - 2).
+		Align(lipgloss.Center)
+	b.WriteString(titleStyle.Render("OPTIONS"))
+	b.WriteString("\n")
 
 	sidebarSelectedStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -601,8 +803,28 @@ func (v Viewer) highlightSearchTerm(line string) string {
 // renderContent renders the right content pane
 func (v Viewer) renderContent() string {
 	var b strings.Builder
-	vpHeight := v.viewportHeight()
-	contentW := v.contentWidth()
+	vpHeight := v.viewportHeight() - 1 // -1 for title
+	contentW := v.contentWidth() - 2   // Account for border
+
+	// Content pane border and title color based on focus
+	var borderColor, titleBg lipgloss.Color
+	if v.focusPane == PaneContent {
+		borderColor = lipgloss.Color("212") // Pink when focused
+		titleBg = lipgloss.Color("62")      // Brighter purple when focused
+	} else {
+		borderColor = lipgloss.Color("241") // Gray when not focused
+		titleBg = lipgloss.Color("238")     // Dark gray when not focused
+	}
+
+	// Title bar
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Background(titleBg).
+		Width(contentW).
+		Align(lipgloss.Center)
+	b.WriteString(titleStyle.Render("CONTENT"))
+	b.WriteString("\n")
 
 	// Style for matching lines (subtle green background)
 	matchingLineStyle := lipgloss.NewStyle().
@@ -645,7 +867,214 @@ func (v Viewer) renderContent() string {
 		}
 	}
 
-	return b.String()
+	// Wrap content in a border
+	contentStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		BorderLeft(true).
+		Width(v.contentWidth())
+
+	return contentStyle.Render(b.String())
+}
+
+// renderSectionsPane renders the right sidebar with man page sections
+func (v Viewer) renderSectionsPane() string {
+	var b strings.Builder
+	paneW := v.sectionsPaneWidth()
+	vpHeight := v.viewportHeight() - 1 // -1 for title
+	sections := v.content.ManSections
+
+	// When focused, use sectionCursor; otherwise show current viewing section
+	var highlightIdx int
+	if v.focusPane == PaneSections {
+		highlightIdx = v.sectionCursor
+	} else {
+		highlightIdx = v.currentManSectionIndex()
+	}
+
+	// Sections pane border and title color based on focus
+	var borderColor, titleBg lipgloss.Color
+	if v.focusPane == PaneSections {
+		borderColor = lipgloss.Color("212") // Pink when focused
+		titleBg = lipgloss.Color("62")      // Brighter purple when focused
+	} else {
+		borderColor = lipgloss.Color("241") // Gray when not focused
+		titleBg = lipgloss.Color("238")     // Dark gray when not focused
+	}
+
+	// Title bar
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Background(titleBg).
+		Width(paneW - 4).
+		Align(lipgloss.Center)
+	b.WriteString(titleStyle.Render("SECTIONS"))
+	b.WriteString("\n")
+
+	// Styles for section items
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Width(paneW - 4)
+
+	normalStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Width(paneW - 4)
+
+	for i := 0; i < vpHeight; i++ {
+		var line string
+		if i < len(sections) {
+			section := sections[i]
+			name := section.Name
+			if len(name) > paneW-6 {
+				name = name[:paneW-9] + "..."
+			}
+			if i == highlightIdx {
+				line = selectedStyle.Render("> " + name)
+			} else {
+				line = normalStyle.Render("  " + name)
+			}
+		} else {
+			line = normalStyle.Render("")
+		}
+		b.WriteString(line)
+		if i < vpHeight-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	// Wrap in a border
+	paneStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		BorderLeft(true).
+		Width(paneW)
+
+	return paneStyle.Render(b.String())
+}
+
+// renderSectionModal renders the section selector modal overlay
+func (v Viewer) renderSectionModal() string {
+	sections := v.content.ManSections
+	if len(sections) == 0 {
+		return ""
+	}
+
+	modalHeight := v.sectionModalHeight()
+	modalWidth := 40
+
+	// Modal styles
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Width(modalWidth - 4)
+
+	normalStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Width(modalWidth - 4)
+
+	var lines []string
+
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("212")).
+		Width(modalWidth - 4).
+		Align(lipgloss.Center)
+	lines = append(lines, titleStyle.Render("Go to Section"))
+	lines = append(lines, strings.Repeat("─", modalWidth-4))
+
+	// Section list
+	for i := 0; i < modalHeight; i++ {
+		idx := v.sectionScrollOffset + i
+		if idx >= len(sections) {
+			lines = append(lines, normalStyle.Render(""))
+			continue
+		}
+		section := sections[idx]
+		var line string
+		if idx == v.sectionCursor {
+			line = selectedStyle.Render("> " + section.Name)
+		} else {
+			line = normalStyle.Render("  " + section.Name)
+		}
+		lines = append(lines, line)
+	}
+
+	// Help line
+	lines = append(lines, strings.Repeat("─", modalWidth-4))
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Width(modalWidth - 4).
+		Align(lipgloss.Center)
+	lines = append(lines, helpStyle.Render("↑↓ navigate • enter select • esc close"))
+
+	content := strings.Join(lines, "\n")
+
+	// Modal box with border
+	modalStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(0, 1).
+		Width(modalWidth)
+
+	return modalStyle.Render(content)
+}
+
+// overlayModal centers the modal over the background content
+func (v Viewer) overlayModal(background, modal string) string {
+	bgLines := strings.Split(background, "\n")
+	modalLines := strings.Split(modal, "\n")
+
+	// Calculate modal position (center)
+	modalHeight := len(modalLines)
+	modalWidth := 0
+	for _, line := range modalLines {
+		if len(line) > modalWidth {
+			modalWidth = len(line)
+		}
+	}
+
+	startY := (len(bgLines) - modalHeight) / 2
+	startX := (v.width - modalWidth) / 2
+	if startY < 0 {
+		startY = 0
+	}
+	if startX < 0 {
+		startX = 0
+	}
+
+	// Overlay modal on background
+	for i, modalLine := range modalLines {
+		bgIdx := startY + i
+		if bgIdx >= len(bgLines) {
+			break
+		}
+
+		bgLine := bgLines[bgIdx]
+		// Convert to runes for proper unicode handling
+		bgRunes := []rune(bgLine)
+		modalRunes := []rune(modalLine)
+
+		// Pad background line if needed
+		for len(bgRunes) < startX+len(modalRunes) {
+			bgRunes = append(bgRunes, ' ')
+		}
+
+		// Overlay modal characters
+		for j, r := range modalRunes {
+			if startX+j < len(bgRunes) {
+				bgRunes[startX+j] = r
+			}
+		}
+
+		bgLines[bgIdx] = string(bgRunes)
+	}
+
+	return strings.Join(bgLines, "\n")
 }
 
 // View implements tea.Model
@@ -686,11 +1115,19 @@ func (v Viewer) View() string {
 	b.WriteString(titleBar)
 	b.WriteString("\n")
 
-	// Two-column layout: sidebar + content
+	// Three-column layout: sidebar + content + sections pane
 	sidebar := v.renderSidebar()
 	content := v.renderContent()
+	sectionsPane := v.renderSectionsPane()
 
-	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content)
+	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content, sectionsPane)
+
+	// Overlay modal if in section select mode
+	if v.mode == ModeSectionSelect {
+		modal := v.renderSectionModal()
+		mainArea = v.overlayModal(mainArea, modal)
+	}
+
 	b.WriteString(mainArea)
 	b.WriteString("\n")
 
@@ -715,10 +1152,12 @@ func (v Viewer) View() string {
 			Render(prefix) + v.searchInput + "█"
 	case ModeNormal:
 		if v.searchQuery != "" {
-			cmdLine = helpStyle.Render("n next • N prev • esc clear • tab switch • / search • q quit")
+			cmdLine = helpStyle.Render("n next • N prev • esc clear • tab switch • g sections • / search • q quit")
 		} else {
-			cmdLine = helpStyle.Render("tab switch • ↑↓ navigate • enter select • /oOd search • q quit")
+			cmdLine = helpStyle.Render("tab switch • ↑↓ navigate • enter select • g sections • /oOd search • q quit")
 		}
+	case ModeSectionSelect:
+		cmdLine = helpStyle.Render("↑↓ navigate • enter jump • esc/g close")
 	}
 	cmdLineBar := lipgloss.NewStyle().
 		Width(v.width).

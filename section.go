@@ -15,11 +15,18 @@ type Section struct {
 	EndLine     int    // Line number where this section ends
 }
 
+// ManSection represents a major section in a man page (NAME, SYNOPSIS, DESCRIPTION, etc.)
+type ManSection struct {
+	Name      string // The section name, e.g., "NAME", "SYNOPSIS", "DESCRIPTION"
+	StartLine int    // Line number where this section starts
+}
+
 // ManPageContent represents the full content of a man page
 type ManPageContent struct {
-	RawContent string    // The full man page text
-	Lines      []string  // Lines of the man page
-	Sections   []Section // Parsed option sections
+	RawContent  string       // The full man page text
+	Lines       []string     // Lines of the man page
+	Sections    []Section    // Parsed option sections
+	ManSections []ManSection // Major man page sections (NAME, SYNOPSIS, etc.)
 }
 
 // FetchManPage retrieves the content of a man page
@@ -39,9 +46,10 @@ func FetchManPage(section, name string) (*ManPageContent, error) {
 	lines := strings.Split(content, "\n")
 
 	mpc := &ManPageContent{
-		RawContent: content,
-		Lines:      lines,
-		Sections:   parseOptionSections(lines),
+		RawContent:  content,
+		Lines:       lines,
+		Sections:    parseOptionSections(lines),
+		ManSections: parseManSections(lines),
 	}
 
 	return mpc, nil
@@ -161,6 +169,30 @@ func parseOptionSections(lines []string) []Section {
 			}
 		} else {
 			i++
+		}
+	}
+
+	return sections
+}
+
+// parseManSections extracts major section headers from man page lines
+// These are lines that consist of all uppercase letters (e.g., NAME, SYNOPSIS, DESCRIPTION)
+func parseManSections(lines []string) []ManSection {
+	var sections []ManSection
+
+	// Pattern: line starts with uppercase letter and contains only uppercase letters and spaces
+	sectionHeaderRe := regexp.MustCompile(`^[A-Z][A-Z ]+$`)
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if sectionHeaderRe.MatchString(trimmed) {
+			sections = append(sections, ManSection{
+				Name:      trimmed,
+				StartLine: i,
+			})
 		}
 	}
 
