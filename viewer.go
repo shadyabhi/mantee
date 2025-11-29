@@ -34,6 +34,7 @@ const (
 	PaneSidebar  FocusPane = iota // Left sidebar with options list
 	PaneContent                   // Center content pane
 	PaneSections                  // Right sidebar with man sections
+	PaneCount                     // Total number of panes (must be last)
 )
 
 // Viewer is the Bubble Tea model for the man page viewer
@@ -62,11 +63,12 @@ type Viewer struct {
 // NewViewer creates a new Viewer for the given man page
 func NewViewer(page ManPage, content *ManPageContent) Viewer {
 	return Viewer{
-		content: content,
-		manPage: page,
-		mode:    ModeNormal,
-		width:   80,
-		height:  24,
+		content:   content,
+		manPage:   page,
+		mode:      ModeNormal,
+		focusPane: PaneContent,
+		width:     80,
+		height:    24,
 	}
 }
 
@@ -104,15 +106,13 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return v, tea.Quit
 
 	case "tab":
-		// Cycle through panes: Sidebar -> Content -> Sections -> Sidebar
-		switch v.focusPane {
-		case PaneSidebar:
-			v.focusPane = PaneContent
-		case PaneContent:
-			v.focusPane = PaneSections
-		case PaneSections:
-			v.focusPane = PaneSidebar
-		}
+		// Cycle through panes forward
+		v.focusPane = (v.focusPane + 1) % PaneCount
+		return v, nil
+
+	case "shift+tab":
+		// Cycle through panes backward
+		v.focusPane = (v.focusPane + PaneCount - 1) % PaneCount
 		return v, nil
 
 	case "/":
@@ -405,6 +405,7 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		v.mode = ModeNormal
+		v.focusPane = PaneContent // Keep focus on content pane after search
 		return v, nil
 
 	case "backspace":
@@ -600,6 +601,21 @@ func (v Viewer) isLineMatching(lineNum int) bool {
 		if lineNum >= section.StartLine && lineNum <= section.EndLine {
 			return true
 		}
+	}
+	return false
+}
+
+// isCurrentMatchLine checks if a line number is the currently selected match
+func (v Viewer) isCurrentMatchLine(lineNum int) bool {
+	if len(v.matchingLines) > 0 {
+		// Line-based search (full-text)
+		return lineNum == v.matchingLines[v.currentMatch]
+	}
+	if len(v.filteredIndices) > 0 {
+		// Section-based search - current match is the start line of the section
+		sectionIdx := v.filteredIndices[v.currentMatch]
+		section := v.content.Sections[sectionIdx]
+		return lineNum == section.StartLine
 	}
 	return false
 }
@@ -826,7 +842,13 @@ func (v Viewer) renderContent() string {
 	b.WriteString(titleStyle.Render("CONTENT"))
 	b.WriteString("\n")
 
-	// Style for matching lines (subtle green background)
+	// Style for the current match (the one we navigated to with n/N)
+	currentMatchStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("208")). // Bright orange background
+		Foreground(lipgloss.Color("0")).   // Black text
+		Bold(true)
+
+	// Style for other matching lines (subtle green background)
 	matchingLineStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("22")).
 		Foreground(lipgloss.Color("252"))
@@ -838,41 +860,54 @@ func (v Viewer) renderContent() string {
 
 	normalLineStyle := lipgloss.NewStyle()
 
+	// Arrow indicator for current match
+	arrowStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")). // Bright orange
+		Bold(true)
+
 	for i := 0; i < vpHeight; i++ {
 		lineIdx := v.scrollOffset + i
 		var line string
 		if lineIdx < len(v.content.Lines) {
 			line = v.content.Lines[lineIdx]
-			// Truncate if too long
-			if len(line) > contentW {
-				line = line[:contentW]
+			// Truncate if too long (leave room for arrow indicator)
+			maxLen := contentW - 2 // Reserve 2 chars for "→ " prefix
+			if len(line) > maxLen {
+				line = line[:maxLen]
 			}
 		}
 
 		// Highlight matching lines and search terms
-		if v.searchQuery != "" && v.isLineMatching(lineIdx) {
-			// First highlight the search term, then apply line background
+		if v.searchQuery != "" && v.isCurrentMatchLine(lineIdx) {
+			// This is the CURRENT match - use distinct highlighting with arrow
 			highlightedLine := v.highlightSearchTerm(line)
-			// Pad to contentW for consistent background
-			padding := contentW - len(line)
+			padding := contentW - 2 - len(line) // -2 for arrow prefix
 			if padding > 0 {
 				highlightedLine += strings.Repeat(" ", padding)
 			}
-			b.WriteString(matchingLineStyle.Render(highlightedLine))
+			b.WriteString(arrowStyle.Render("→ ") + currentMatchStyle.Render(highlightedLine))
+		} else if v.searchQuery != "" && v.isLineMatching(lineIdx) {
+			// Other matching lines
+			highlightedLine := v.highlightSearchTerm(line)
+			padding := contentW - 2 - len(line)
+			if padding > 0 {
+				highlightedLine += strings.Repeat(" ", padding)
+			}
+			b.WriteString("  " + matchingLineStyle.Render(highlightedLine))
 		} else if v.focusPane == PaneContent && i == 0 {
 			// Highlight the first visible line when content pane is focused
-			padding := contentW - len(line)
+			padding := contentW - 2 - len(line)
 			if padding > 0 {
 				line += strings.Repeat(" ", padding)
 			}
-			b.WriteString(currentLineStyle.Render(line))
+			b.WriteString("  " + currentLineStyle.Render(line))
 		} else {
 			// Pad to contentW
-			padding := contentW - len(line)
+			padding := contentW - 2 - len(line)
 			if padding > 0 {
 				line += strings.Repeat(" ", padding)
 			}
-			b.WriteString(normalLineStyle.Render(line))
+			b.WriteString("  " + normalLineStyle.Render(line))
 		}
 		if i < vpHeight-1 {
 			b.WriteString("\n")
