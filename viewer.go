@@ -831,6 +831,11 @@ func (v Viewer) renderContent() string {
 		Background(lipgloss.Color("22")).
 		Foreground(lipgloss.Color("252"))
 
+	// Style for current line when content pane is focused (subtle underline effect)
+	currentLineStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("236")). // Dark gray background
+		Foreground(lipgloss.Color("255"))  // Bright white text
+
 	normalLineStyle := lipgloss.NewStyle()
 
 	for i := 0; i < vpHeight; i++ {
@@ -854,6 +859,13 @@ func (v Viewer) renderContent() string {
 				highlightedLine += strings.Repeat(" ", padding)
 			}
 			b.WriteString(matchingLineStyle.Render(highlightedLine))
+		} else if v.focusPane == PaneContent && i == 0 {
+			// Highlight the first visible line when content pane is focused
+			padding := contentW - len(line)
+			if padding > 0 {
+				line += strings.Repeat(" ", padding)
+			}
+			b.WriteString(currentLineStyle.Render(line))
 		} else {
 			// Pad to contentW
 			padding := contentW - len(line)
