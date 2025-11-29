@@ -60,4 +60,4 @@ changelog:
       - "^test:"
 
 snapshot:
-  version_template: "{{ incpatch .Version }}"
+  version_template: "dev-{{ .ShortCommit }}"
