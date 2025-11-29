@@ -15,6 +15,7 @@ const (
 	ModeNormal        ViewerMode = iota // Normal viewing mode
 	ModeSearch                          // Search/command input mode
 	ModeSectionSelect                   // Section selector modal
+	ModeHelp                            // Help/shortcuts modal
 )
 
 // SearchType represents what field to search in
@@ -93,6 +94,8 @@ func (v Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v.updateSearch(msg)
 		case ModeSectionSelect:
 			return v.updateSectionSelect(msg)
+		case ModeHelp:
+			return v.updateHelp(msg)
 		}
 	}
 	return v, nil
@@ -183,6 +186,11 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			v.sectionCursor = 0
 			v.sectionScrollOffset = 0
 		}
+		return v, nil
+
+	case "?":
+		// Open help modal
+		v.mode = ModeHelp
 		return v, nil
 	}
 
@@ -477,6 +485,20 @@ func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		v.sectionCursor = len(sections) - 1
 		v.adjustSectionScroll()
+		return v, nil
+	}
+	return v, nil
+}
+
+func (v Viewer) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		v.quitting = true
+		return v, tea.Quit
+
+	case "esc", "?", "q":
+		// Close help modal
+		v.mode = ModeNormal
 		return v, nil
 	}
 	return v, nil
@@ -1071,6 +1093,101 @@ func (v Viewer) renderSectionModal() string {
 	return modalStyle.Render(content)
 }
 
+// renderHelpModal renders the help/shortcuts modal overlay
+func (v Viewer) renderHelpModal() string {
+	modalWidth := 50
+
+	// Define all shortcuts
+	shortcuts := []struct {
+		key  string
+		desc string
+	}{
+		{"Navigation", ""},
+		{"↑/k, ↓/j", "Move up/down"},
+		{"←/h, →/l", "Switch panes"},
+		{"tab", "Cycle panes forward"},
+		{"shift+tab", "Cycle panes backward"},
+		{"pgup/ctrl+u", "Page up"},
+		{"pgdown/ctrl+d", "Page down"},
+		{"home", "Go to top"},
+		{"G", "Go to bottom / Open sections"},
+		{"enter", "Select item / Jump to section"},
+		{"", ""},
+		{"Search", ""},
+		{"/", "Search all content"},
+		{"o", "Search options (partial)"},
+		{"O", "Search options (exact)"},
+		{"d", "Search descriptions"},
+		{"n", "Next match"},
+		{"N", "Previous match"},
+		{"esc", "Clear search"},
+		{"", ""},
+		{"Other", ""},
+		{"?", "Show this help"},
+		{"q", "Quit"},
+	}
+
+	// Styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("212")).
+		Width(modalWidth - 4).
+		Align(lipgloss.Center)
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("229")).
+		Width(modalWidth - 4)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212")).
+		Bold(true)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252"))
+
+	var lines []string
+
+	// Title
+	lines = append(lines, titleStyle.Render("Keyboard Shortcuts"))
+	lines = append(lines, strings.Repeat("─", modalWidth-4))
+
+	// Shortcuts list
+	for _, s := range shortcuts {
+		if s.key == "" && s.desc == "" {
+			// Empty line
+			lines = append(lines, "")
+		} else if s.desc == "" {
+			// Section header
+			lines = append(lines, headerStyle.Render(s.key))
+		} else {
+			// Key-description pair
+			keyPart := keyStyle.Render(fmt.Sprintf("%-14s", s.key))
+			descPart := descStyle.Render(s.desc)
+			lines = append(lines, "  "+keyPart+" "+descPart)
+		}
+	}
+
+	// Help line
+	lines = append(lines, strings.Repeat("─", modalWidth-4))
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Width(modalWidth - 4).
+		Align(lipgloss.Center)
+	lines = append(lines, footerStyle.Render("Press ?, esc, or q to close"))
+
+	content := strings.Join(lines, "\n")
+
+	// Modal box with border
+	modalStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(0, 1).
+		Width(modalWidth)
+
+	return modalStyle.Render(content)
+}
+
 // overlayModal centers the modal over the background content
 func (v Viewer) overlayModal(background, modal string) string {
 	bgLines := strings.Split(background, "\n")
@@ -1169,9 +1286,12 @@ func (v Viewer) View() string {
 
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content, sectionsPane)
 
-	// Overlay modal if in section select mode
+	// Overlay modal if in section select or help mode
 	if v.mode == ModeSectionSelect {
 		modal := v.renderSectionModal()
+		mainArea = v.overlayModal(mainArea, modal)
+	} else if v.mode == ModeHelp {
+		modal := v.renderHelpModal()
 		mainArea = v.overlayModal(mainArea, modal)
 	}
 
@@ -1199,12 +1319,14 @@ func (v Viewer) View() string {
 			Render(prefix) + v.searchInput + "█"
 	case ModeNormal:
 		if v.searchQuery != "" {
-			cmdLine = helpStyle.Render("n next • N prev • esc clear • tab switch • g sections • / search • q quit")
+			cmdLine = helpStyle.Render("n next • N prev • esc clear • tab switch • G sections • ? help • q quit")
 		} else {
-			cmdLine = helpStyle.Render("tab switch • ↑↓ navigate • enter select • g sections • /oOd search • q quit")
+			cmdLine = helpStyle.Render("tab switch • ↑↓ navigate • enter select • G sections • ? help • q quit")
 		}
 	case ModeSectionSelect:
-		cmdLine = helpStyle.Render("↑↓ navigate • enter jump • esc/g close")
+		cmdLine = helpStyle.Render("↑↓ navigate • enter jump • esc/G close")
+	case ModeHelp:
+		cmdLine = helpStyle.Render("Press ?, esc, or q to close")
 	}
 	cmdLineBar := lipgloss.NewStyle().
 		Width(v.width).
