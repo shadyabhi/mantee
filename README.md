@@ -31,7 +31,7 @@ mantee grep     # Search for "grep" and select from results
 - `Tab` / `Shift+Tab` - Cycle between panes (Options, Content, Sections)
 - `j/k` or `↑/↓` - Navigate within pane
 - `Enter` - Select item / jump to section
-- `g` - Open section selector modal
+- `G` - Open section selector modal
 
 ### Search
 - `/` - Full-text search

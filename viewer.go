@@ -176,7 +176,7 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
-	case "g":
+	case "G":
 		// Open section selector modal
 		if len(v.content.ManSections) > 0 {
 			v.mode = ModeSectionSelect
