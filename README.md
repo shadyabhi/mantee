@@ -1,5 +1,7 @@
 # mantee
 
+[![Go](https://github.com/shadyabhi/mantee/actions/workflows/go.yml/badge.svg)](https://github.com/shadyabhi/mantee/actions/workflows/go.yml)
+
 A TUI man page viewer with search and navigation.
 
 ## Installation

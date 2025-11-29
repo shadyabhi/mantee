@@ -15,7 +15,9 @@
       "Bash(mkdir:*)",
       "Bash(gh run view:*)",
       "Bash(git tag:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(jj status:*)",
+      "Bash(jj log:*)"
     ],
     "deny": [],
     "ask": []
