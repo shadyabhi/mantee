@@ -1,0 +1,63 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod vendor
+    - go generate ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    binary: mantee
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -mod=vendor
+    ldflags:
+      - -s -w -X main.version={{.Tag}} -X main.commit={{.FullCommit}} -X main.date={{.Date}}
+
+universal_binaries:
+  - replace: true
+
+brews:
+  - name: mantee
+    homepage: https://github.com/shadyabhi/mantee
+    repository:
+      owner: shadyabhi
+      name: homebrew-tap
+    description: "A TUI for reading man pages"
+    commit_author:
+      name: shadyabhi
+      email: abhijeet.1989@gmail.com
+
+checksum:
+  name_template: 'checksums.txt'
+
+archives:
+  - formats: ['tar.gz']
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}"

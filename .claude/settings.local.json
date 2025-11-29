@@ -9,7 +9,10 @@
       "Bash(od:*)",
       "Bash(MANWIDTH=80 man:*)",
       "Bash(col:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
