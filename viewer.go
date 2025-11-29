@@ -53,6 +53,7 @@ type Viewer struct {
 	matchingLines       []int      // Line numbers matching the search (for full-text search)
 	currentMatch        int        // Current match index when navigating
 	scrollOffset        int        // Current scroll position
+	contentCursor       int        // Cursor position within content (relative to scrollOffset)
 	width               int
 	height              int
 	quitting            bool
@@ -266,51 +267,95 @@ func (v *Viewer) adjustSidebarScroll() {
 }
 
 func (v Viewer) updateContent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	vpHeight := v.viewportHeight()
+	maxLine := len(v.content.Lines) - 1
+	if maxLine < 0 {
+		maxLine = 0
+	}
+
 	switch msg.String() {
 	case "up", "k":
-		if v.scrollOffset > 0 {
-			v.scrollOffset--
+		// Move cursor up
+		currentLine := v.scrollOffset + v.contentCursor
+		if currentLine > 0 {
+			if v.contentCursor > 0 {
+				// Cursor can move up within viewport
+				v.contentCursor--
+			} else {
+				// Cursor at top of viewport, scroll up
+				v.scrollOffset--
+			}
 		}
 		return v, nil
 
 	case "down", "j":
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
-		if maxScroll < 0 {
-			maxScroll = 0
-		}
-		if v.scrollOffset < maxScroll {
-			v.scrollOffset++
+		// Move cursor down
+		currentLine := v.scrollOffset + v.contentCursor
+		if currentLine < maxLine {
+			if v.contentCursor < vpHeight-1 {
+				// Cursor can move down within viewport
+				v.contentCursor++
+			} else {
+				// Cursor at bottom of viewport, scroll down
+				v.scrollOffset++
+			}
 		}
 		return v, nil
 
 	case "pgup", "ctrl+u":
-		v.scrollOffset -= v.viewportHeight() / 2
-		if v.scrollOffset < 0 {
-			v.scrollOffset = 0
+		halfPage := vpHeight / 2
+		currentLine := v.scrollOffset + v.contentCursor
+		newLine := currentLine - halfPage
+		if newLine < 0 {
+			newLine = 0
+		}
+		// Adjust scroll and cursor
+		if newLine < v.scrollOffset {
+			v.scrollOffset = newLine
+			v.contentCursor = 0
+		} else {
+			v.contentCursor = newLine - v.scrollOffset
 		}
 		return v, nil
 
 	case "pgdown", "ctrl+d":
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
+		halfPage := vpHeight / 2
+		currentLine := v.scrollOffset + v.contentCursor
+		newLine := currentLine + halfPage
+		if newLine > maxLine {
+			newLine = maxLine
+		}
+		// Adjust scroll and cursor
+		maxScroll := len(v.content.Lines) - vpHeight
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
-		v.scrollOffset += v.viewportHeight() / 2
-		if v.scrollOffset > maxScroll {
-			v.scrollOffset = maxScroll
+		if newLine >= v.scrollOffset+vpHeight {
+			v.scrollOffset = newLine - vpHeight + 1
+			if v.scrollOffset > maxScroll {
+				v.scrollOffset = maxScroll
+			}
+			v.contentCursor = newLine - v.scrollOffset
+		} else {
+			v.contentCursor = newLine - v.scrollOffset
 		}
 		return v, nil
 
 	case "home":
 		v.scrollOffset = 0
+		v.contentCursor = 0
 		return v, nil
 
 	case "G":
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
+		maxScroll := len(v.content.Lines) - vpHeight
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
 		v.scrollOffset = maxScroll
+		v.contentCursor = vpHeight - 1
+		if v.contentCursor > maxLine-v.scrollOffset {
+			v.contentCursor = maxLine - v.scrollOffset
+		}
 		return v, nil
 
 	case "left", "h":
@@ -685,15 +730,15 @@ func (v Viewer) sectionsPaneWidth() int {
 }
 
 // currentManSectionIndex returns the index of the man section currently visible
-// based on the scroll position (returns -1 if no sections)
+// based on the cursor position (returns -1 if no sections)
 func (v Viewer) currentManSectionIndex() int {
 	sections := v.content.ManSections
 	if len(sections) == 0 {
 		return -1
 	}
 
-	// Find which section contains the current scroll position
-	currentLine := v.scrollOffset
+	// Find which section contains the current cursor position
+	currentLine := v.scrollOffset + v.contentCursor
 	currentIdx := 0
 
 	for i, section := range sections {
@@ -916,8 +961,8 @@ func (v Viewer) renderContent() string {
 				highlightedLine += strings.Repeat(" ", padding)
 			}
 			b.WriteString("  " + matchingLineStyle.Render(highlightedLine))
-		} else if v.focusPane == PaneContent && i == 0 {
-			// Highlight the first visible line when content pane is focused
+		} else if v.focusPane == PaneContent && i == v.contentCursor {
+			// Highlight the cursor line when content pane is focused
 			padding := contentW - 2 - len(line)
 			if padding > 0 {
 				line += strings.Repeat(" ", padding)
