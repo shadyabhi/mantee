@@ -12,7 +12,10 @@
       "Bash(go test:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(gh run view:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
