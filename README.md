@@ -28,12 +28,14 @@ mantee grep     # Search for "grep" and select from results
 ## Keybindings
 
 ### Navigation
+
 - `Tab` / `Shift+Tab` - Cycle between panes (Options, Content, Sections)
 - `j/k` or `↑/↓` - Navigate within pane
 - `Enter` - Select item / jump to section
 - `G` - Open section selector modal
 
 ### Search
+
 - `/` - Full-text search
 - `o` - Search options (partial match)
 - `O` - Search options (exact match)
@@ -42,8 +44,5 @@ mantee grep     # Search for "grep" and select from results
 - `Esc` - Clear search
 
 ### General
+
 - `q` - Quit
-
-## License
-
-MIT
