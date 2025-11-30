@@ -46,3 +46,4 @@ mantee grep     # Search for "grep" and select from results
 ### General
 
 - `q` - Quit
+
