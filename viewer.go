@@ -729,6 +729,14 @@ func (v Viewer) sectionsPaneWidth() int {
 	return 22
 }
 
+// calculatePercentage returns the percentage position (0-100) given current position and total items
+func calculatePercentage(current, total int) int {
+	if total <= 1 {
+		return 100
+	}
+	return current * 100 / (total - 1)
+}
+
 // currentManSectionIndex returns the index of the man section currently visible
 // based on the cursor position (returns -1 if no sections)
 func (v Viewer) currentManSectionIndex() int {
@@ -784,14 +792,18 @@ func (v Viewer) renderSidebar() string {
 		titleBg = lipgloss.Color("238")     // Dark gray when not focused
 	}
 
-	// Title bar
+	// Title bar with percentage completion
+	displayedIndices := v.getDisplayedSectionIndices()
+	percentage := calculatePercentage(v.sidebarCursor, len(displayedIndices))
+	titleText := fmt.Sprintf("OPTIONS (%d%%)", percentage)
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("255")).
 		Background(titleBg).
 		Width(sidebarW - 2).
 		Align(lipgloss.Center)
-	b.WriteString(titleStyle.Render("OPTIONS"))
+	b.WriteString(titleStyle.Render(titleText))
 	b.WriteString("\n")
 
 	sidebarSelectedStyle := lipgloss.NewStyle().
@@ -803,8 +815,6 @@ func (v Viewer) renderSidebar() string {
 	sidebarNormalStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("252")).
 		Width(sidebarW - 2)
-
-	displayedIndices := v.getDisplayedSectionIndices()
 
 	for i := 0; i < vpHeight; i++ {
 		displayIdx := v.sidebarScrollOffset + i
@@ -899,14 +909,18 @@ func (v Viewer) renderContent() string {
 		titleBg = lipgloss.Color("238")     // Dark gray when not focused
 	}
 
-	// Title bar
+	// Title bar with percentage completion
+	currentLine := v.scrollOffset + v.contentCursor
+	percentage := calculatePercentage(currentLine, len(v.content.Lines))
+	titleText := fmt.Sprintf("CONTENT (%d%%)", percentage)
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("255")).
 		Background(titleBg).
 		Width(contentW).
 		Align(lipgloss.Center)
-	b.WriteString(titleStyle.Render("CONTENT"))
+	b.WriteString(titleStyle.Render(titleText))
 	b.WriteString("\n")
 
 	// Style for the current match (the one we navigated to with n/N)
@@ -1016,14 +1030,17 @@ func (v Viewer) renderSectionsPane() string {
 		titleBg = lipgloss.Color("238")     // Dark gray when not focused
 	}
 
-	// Title bar
+	// Title bar with percentage completion
+	percentage := calculatePercentage(highlightIdx, len(sections))
+	titleText := fmt.Sprintf("SECTIONS (%d%%)", percentage)
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("255")).
 		Background(titleBg).
 		Width(paneW - 4).
 		Align(lipgloss.Center)
-	b.WriteString(titleStyle.Render("SECTIONS"))
+	b.WriteString(titleStyle.Render(titleText))
 	b.WriteString("\n")
 
 	// Styles for section items
