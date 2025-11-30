@@ -57,7 +57,7 @@ func main() {
 
 	// Launch the viewer
 	viewer := NewViewer(*selected, content)
-	viewerProgram := tea.NewProgram(viewer, tea.WithAltScreen())
+	viewerProgram := tea.NewProgram(viewer, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	_, err = viewerProgram.Run()
 	if err != nil {

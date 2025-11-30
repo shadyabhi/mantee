@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -85,6 +86,13 @@ func (v Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
+		return v, nil
+
+	case tea.MouseMsg:
+		// Handle mouse events
+		if msg.Type == tea.MouseLeft {
+			return v.handleMouseClick(msg)
+		}
 		return v, nil
 
 	case tea.KeyMsg:
@@ -627,8 +635,8 @@ func (v *Viewer) scrollToCurrentMatch() {
 		sectionIdx := v.filteredIndices[v.currentMatch]
 		section := v.content.Sections[sectionIdx]
 		targetLine = section.StartLine
-		// Also update sidebar cursor to match the current section
-		v.sidebarCursor = sectionIdx
+		// Also update sidebar cursor to match the current match position in filtered list
+		v.sidebarCursor = v.currentMatch
 		v.adjustSidebarScroll()
 	} else {
 		return
@@ -821,7 +829,10 @@ func (v Viewer) renderSidebar() string {
 		var line string
 		if displayIdx < len(displayedIndices) {
 			sectionIdx := displayedIndices[displayIdx]
-			opt := truncateOption(v.content.Sections[sectionIdx].Option, sidebarW-4)
+			section := v.content.Sections[sectionIdx]
+			// Extract only the option flags, not the description
+			optFlags := extractOptionFlags(section.Option)
+			opt := truncateOption(optFlags, sidebarW-4)
 			if displayIdx == v.sidebarCursor {
 				line = sidebarSelectedStyle.Render("> " + opt)
 			} else {
@@ -844,6 +855,70 @@ func (v Viewer) renderSidebar() string {
 		Width(sidebarW)
 
 	return sidebarStyle.Render(b.String())
+}
+
+// highlightClickableOptions highlights option flags in a line to show they are clickable
+func (v Viewer) highlightClickableOptions(line string) string {
+	// Don't highlight options in heavily indented lines (examples, code blocks)
+	// Option definitions are typically at 5-8 spaces, so anything > 12 is likely an example
+	leadingSpaces := len(line) - len(strings.TrimLeft(line, " \t"))
+	if leadingSpaces > 12 {
+		return line
+	}
+
+	// Style for clickable options - cyan/blue color with underline
+	optionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("117")). // Light blue
+		Underline(true)
+
+	// Simpler approach: find all option-like patterns, then validate them
+	// Pattern matches: -X or --word-with-dashes
+	optionPattern := `-[a-zA-Z0-9](?:[a-zA-Z0-9-]*)?|--[a-zA-Z][a-zA-Z0-9-]*`
+	re := regexp.MustCompile(optionPattern)
+
+	// Find all matches and their positions
+	matches := re.FindAllStringIndex(line, -1)
+	if len(matches) == 0 {
+		return line
+	}
+
+	var result strings.Builder
+	lastEnd := 0
+
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		option := line[start:end]
+
+		// Validate this is actually a standalone option by checking boundaries:
+		// 1. Before: must be start of line, whitespace, or punctuation (not alphanumeric)
+		// 2. After: must be end of line, whitespace, or punctuation (not alphanumeric)
+
+		validBefore := start == 0 || !isAlphanumeric(line[start-1])
+		validAfter := end >= len(line) || !isAlphanumeric(line[end])
+
+		if !validBefore || !validAfter {
+			continue
+		}
+
+		// Check if this option actually exists in our sections
+		// Only highlight if it's a real option we can navigate to
+		if v.findSectionByOption(option) != -1 {
+			// Append text before the match
+			result.WriteString(line[lastEnd:start])
+			// Append the highlighted option
+			result.WriteString(optionStyle.Render(option))
+			lastEnd = end
+		}
+	}
+
+	// Append remaining text
+	result.WriteString(line[lastEnd:])
+	return result.String()
+}
+
+// isAlphanumeric checks if a byte is alphanumeric
+func isAlphanumeric(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // highlightSearchTerm highlights occurrences of the search query in a line
@@ -939,8 +1014,6 @@ func (v Viewer) renderContent() string {
 		Background(lipgloss.Color("236")). // Dark gray background
 		Foreground(lipgloss.Color("255"))  // Bright white text
 
-	normalLineStyle := lipgloss.NewStyle()
-
 	// Arrow indicator for current match
 	arrowStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("208")). // Bright orange
@@ -977,18 +1050,24 @@ func (v Viewer) renderContent() string {
 			b.WriteString("  " + matchingLineStyle.Render(highlightedLine))
 		} else if v.focusPane == PaneContent && i == v.contentCursor {
 			// Highlight the cursor line when content pane is focused
+			// Highlight clickable options first, then add background for cursor line
+			highlightedLine := v.highlightClickableOptions(line)
+			// For cursor line, we need to preserve option highlighting while adding background
+			// So we apply background color inline instead of using a wrapper style
 			padding := contentW - 2 - len(line)
+			paddedLine := highlightedLine
 			if padding > 0 {
-				line += strings.Repeat(" ", padding)
+				paddedLine += currentLineStyle.Render(strings.Repeat(" ", padding))
 			}
-			b.WriteString("  " + currentLineStyle.Render(line))
+			b.WriteString("  " + paddedLine)
 		} else {
-			// Pad to contentW
+			// Normal lines - highlight clickable options
+			highlightedLine := v.highlightClickableOptions(line)
 			padding := contentW - 2 - len(line)
 			if padding > 0 {
-				line += strings.Repeat(" ", padding)
+				highlightedLine += strings.Repeat(" ", padding)
 			}
-			b.WriteString("  " + normalLineStyle.Render(line))
+			b.WriteString("  " + highlightedLine)
 		}
 		if i < vpHeight-1 {
 			b.WriteString("\n")
@@ -1248,6 +1327,167 @@ func (v Viewer) renderHelpModal() string {
 		Width(modalWidth)
 
 	return modalStyle.Render(content)
+}
+
+// handleMouseClick processes mouse click events
+func (v Viewer) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Only handle clicks in normal mode
+	if v.mode != ModeNormal {
+		return v, nil
+	}
+
+	// Layout: [sidebar][content][sections]
+	// Y=0: title bar
+	// Y=1: pane titles
+	// Y=2+: content lines
+
+	// Calculate which line was clicked (accounting for title bars)
+	if msg.Y < 2 {
+		// Click on title bar or pane headers, ignore
+		return v, nil
+	}
+
+	clickedViewportLine := msg.Y - 2
+	clickedLineNum := v.scrollOffset + clickedViewportLine
+
+	if clickedLineNum >= len(v.content.Lines) {
+		return v, nil
+	}
+
+	// Get the clicked line text
+	clickedLine := v.content.Lines[clickedLineNum]
+
+	// Calculate which pane was clicked based on X position
+	// Sidebar: 0 to sidebarWidth
+	// Content: sidebarWidth to (sidebarWidth + contentWidth)
+	// Sections: (sidebarWidth + contentWidth) to end
+	sidebarW := v.sidebarWidth()
+	contentW := v.contentWidth()
+
+	contentStart := sidebarW
+	contentEnd := sidebarW + contentW
+
+	// Check if click is in the content pane area
+	if msg.X >= contentStart && msg.X < contentEnd {
+		// Account for border (1 char) and arrow/padding (2 chars "→ " or "  ")
+		// The border chars don't count in mouse coordinates in lipgloss
+		contentX := msg.X - contentStart - 2
+
+		// Try to extract an option at the clicked position
+		if option := v.extractOptionAtPosition(clickedLine, contentX); option != "" {
+			// Find the section that matches this option
+			if sectionIdx := v.findSectionByOption(option); sectionIdx != -1 {
+				// Jump to the section in content pane
+				section := v.content.Sections[sectionIdx]
+				v.scrollOffset = section.StartLine
+				v.contentCursor = 0 // Reset cursor to top of viewport
+
+				// Ensure we don't scroll past the end
+				maxScroll := len(v.content.Lines) - v.viewportHeight()
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+				if v.scrollOffset > maxScroll {
+					v.scrollOffset = maxScroll
+				}
+
+				// Also update the sidebar cursor to highlight this option
+				displayedIndices := v.getDisplayedSectionIndices()
+				for i, idx := range displayedIndices {
+					if idx == sectionIdx {
+						v.sidebarCursor = i
+						v.adjustSidebarScroll()
+						break
+					}
+				}
+
+				v.focusPane = PaneContent
+			}
+		}
+	}
+
+	return v, nil
+}
+
+// extractOptionAtPosition attempts to extract an option (like "-r" or "--recursive")
+// from the given line at the specified X position
+func (v Viewer) extractOptionAtPosition(line string, x int) string {
+	if x < 0 {
+		return ""
+	}
+
+	// Handle x beyond line length - just use the last character
+	if x >= len(line) {
+		x = len(line) - 1
+	}
+
+	if x < 0 {
+		return ""
+	}
+
+	// Find word boundaries around the clicked position
+	// Options typically look like: -X, --word, or -X, --word
+	start := x
+	end := x
+
+	// Move start backwards to find the beginning of the option (or a dash)
+	for start > 0 && !isWordBoundary(line[start-1]) {
+		start--
+	}
+
+	// If we didn't land on a dash, look backwards for one
+	if start < len(line) && line[start] != '-' {
+		// Check if there's a dash nearby (within 5 chars before)
+		foundDash := false
+		for i := start; i >= 0 && i >= start-5; i-- {
+			if line[i] == '-' {
+				start = i
+				foundDash = true
+				break
+			}
+		}
+		if !foundDash {
+			return ""
+		}
+	}
+
+	// Move end forward to find the end of the option
+	for end < len(line) && !isWordBoundary(line[end]) {
+		end++
+	}
+
+	// Extract the word
+	word := strings.TrimSpace(line[start:end])
+
+	// Check if it looks like an option (starts with -)
+	if strings.HasPrefix(word, "-") {
+		// Clean up trailing punctuation (like commas)
+		word = strings.TrimRight(word, ".,;:")
+		return word
+	}
+
+	return ""
+}
+
+// isWordBoundary returns true if the character is a word boundary for option parsing
+func isWordBoundary(c byte) bool {
+	return c == ' ' || c == '\t' || c == ',' || c == '(' || c == ')' || c == '[' || c == ']'
+}
+
+// findSectionByOption finds the section index that matches the given option string
+// Returns -1 if no match is found
+func (v Viewer) findSectionByOption(option string) int {
+	// Normalize the option (remove leading dashes for comparison)
+	normalizedOpt := strings.TrimLeft(option, "-")
+
+	for i, section := range v.content.Sections {
+		// Use the existing MatchesOptionExact method to find exact matches
+		if section.MatchesOptionExact(normalizedOpt) {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // overlayModal centers the modal over the background content

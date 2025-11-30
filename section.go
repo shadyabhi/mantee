@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+const (
+	// Maximum length for a line containing just option flags
+	// Description text lines are typically much longer
+	maxOptionLineLength = 60
+)
+
 // Section represents a CLI option section from a man page
 type Section struct {
 	Option      string // The CLI option(s), e.g., "-r, --recursive"
@@ -85,6 +91,13 @@ func parseOptionSections(lines []string) []Section {
 				continue
 			}
 
+			// Skip lines that are too long to be option definitions
+			// Description lines are typically much longer than option flag lines
+			if len(trimmed) > maxOptionLineLength {
+				i++
+				continue
+			}
+
 			// Skip lines that look like comma-separated lists of multiple long options
 			// These are typically found in body text, not actual definitions
 			if multiOptionListRe.MatchString(trimmed) {
@@ -99,32 +112,14 @@ func parseOptionSections(lines []string) []Section {
 			optionIndent := len(line) - len(strings.TrimLeft(line, " \t"))
 
 			// Extract the option text
-			optionLines := []string{trimmed}
+			// Most options are just on a single line, so we start with just the trimmed line
+			section.Option = trimmed
 			i++
 
-			// Look for continuation of option line (same indent, still looks like option list)
-			for i < len(lines) {
-				nextLine := lines[i]
-				if strings.TrimSpace(nextLine) == "" {
-					break
-				}
-				nextIndent := len(nextLine) - len(strings.TrimLeft(nextLine, " \t"))
-				// If next line is more indented, it's the explanation
-				if nextIndent > optionIndent+2 {
-					break
-				}
-				// If it looks like another option definition, stop
-				if optionDefRe.MatchString(nextLine) {
-					break
-				}
-				// If it's a section header, stop
-				if sectionHeaderRe.MatchString(strings.TrimSpace(nextLine)) {
-					break
-				}
-				optionLines = append(optionLines, strings.TrimSpace(nextLine))
-				i++
-			}
-			section.Option = strings.Join(optionLines, " ")
+			// Skip collecting continuation lines - man pages typically have
+			// options on one line and descriptions on subsequent indented lines
+			// If there are multi-line options (rare), they would have already been
+			// trimmed and joined when we got 'trimmed' above
 
 			// Now collect the explanation (more indented lines)
 			var explanationLines []string
@@ -153,6 +148,13 @@ func parseOptionSections(lines []string) []Section {
 
 				// Check if this is a new option definition or section header
 				if optionDefRe.MatchString(nextLine) || sectionHeaderRe.MatchString(strings.TrimSpace(nextLine)) {
+					break
+				}
+
+				// Check if this line is actually part of the explanation (more indented)
+				nextIndent := len(nextLine) - len(strings.TrimLeft(nextLine, " \t"))
+				if nextIndent <= optionIndent {
+					// Not indented enough to be an explanation, stop here
 					break
 				}
 
