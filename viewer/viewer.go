@@ -247,13 +247,10 @@ func (v Viewer) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		sectionIdx := displayedIndices[v.sidebarCursor]
 		section := v.content.Sections[sectionIdx]
 		v.scrollOffset = section.StartLine
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
-		if maxScroll < 0 {
-			maxScroll = 0
+		if v.scrollOffset < 0 {
+			v.scrollOffset = 0
 		}
-		if v.scrollOffset > maxScroll {
-			v.scrollOffset = maxScroll
-		}
+		v.contentCursor = 0
 		// Switch to content pane after jumping
 		v.focusPane = paneContent
 		return v, nil
@@ -411,13 +408,10 @@ func (v Viewer) updateSections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Jump to selected section
 		section := sections[v.sectionCursor]
 		v.scrollOffset = section.StartLine
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
-		if maxScroll < 0 {
-			maxScroll = 0
+		if v.scrollOffset < 0 {
+			v.scrollOffset = 0
 		}
-		if v.scrollOffset > maxScroll {
-			v.scrollOffset = maxScroll
-		}
+		v.contentCursor = 0
 		v.focusPane = paneContent
 		return v, nil
 
@@ -526,13 +520,10 @@ func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Jump to selected section
 		section := sections[v.sectionCursor]
 		v.scrollOffset = section.StartLine
-		maxScroll := len(v.content.Lines) - v.viewportHeight()
-		if maxScroll < 0 {
-			maxScroll = 0
+		if v.scrollOffset < 0 {
+			v.scrollOffset = 0
 		}
-		if v.scrollOffset > maxScroll {
-			v.scrollOffset = maxScroll
-		}
+		v.contentCursor = 0
 		v.mode = modeNormal
 		v.focusPane = paneContent
 		return v, nil
@@ -1348,57 +1339,67 @@ func (v Viewer) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Y=1: pane titles
 	// Y=2+: content lines
 
-	// Calculate which line was clicked (accounting for title bars)
 	if msg.Y < 2 {
-		// Click on title bar or pane headers, ignore
+		// Click on title bar or pane headers, ignore for now
 		return v, nil
 	}
 
 	clickedViewportLine := msg.Y - 2
-	clickedLineNum := v.scrollOffset + clickedViewportLine
 
-	if clickedLineNum >= len(v.content.Lines) {
-		return v, nil
-	}
-
-	// Get the clicked line text
-	clickedLine := v.content.Lines[clickedLineNum]
-
-	// Calculate which pane was clicked based on X position
-	// Sidebar: 0 to sidebarWidth
-	// Content: sidebarWidth to (sidebarWidth + contentWidth)
-	// Sections: (sidebarWidth + contentWidth) to end
 	sidebarW := v.sidebarWidth()
 	contentW := v.contentWidth()
 
-	contentStart := sidebarW
-	contentEnd := sidebarW + contentW
+	// Determine which pane was clicked
+	if msg.X < sidebarW {
+		// --- Clicked in Sidebar ---
+		v.focusPane = paneSidebar
 
-	// Check if click is in the content pane area
-	if msg.X >= contentStart && msg.X < contentEnd {
-		// Account for border (1 char) and arrow/padding (2 chars "→ " or "  ")
-		// The border chars don't count in mouse coordinates in lipgloss
-		contentX := msg.X - contentStart - 2
+		displayedIndices := v.getDisplayedSectionIndices()
+		if len(displayedIndices) == 0 {
+			return v, nil
+		}
 
-		// Try to extract an option at the clicked position
+		// Calculate clicked item index
+		clickedItemIndex := v.sidebarScrollOffset + clickedViewportLine
+		if clickedItemIndex >= 0 && clickedItemIndex < len(displayedIndices) {
+			v.sidebarCursor = clickedItemIndex
+
+			// Jump to the selected section in content
+			sectionIdx := displayedIndices[v.sidebarCursor]
+			section := v.content.Sections[sectionIdx]
+			v.scrollOffset = section.StartLine
+			v.contentCursor = 0 // Reset cursor to top of viewport
+			if v.scrollOffset < 0 {
+				v.scrollOffset = 0
+			}
+			// Switch to content pane after jumping so user can scroll
+			v.focusPane = paneContent
+		}
+
+	} else if msg.X < sidebarW+contentW {
+		// --- Clicked in Content ---
+		v.focusPane = paneContent
+		if clickedViewportLine < v.viewportHeight() {
+			v.contentCursor = clickedViewportLine
+		}
+
+		// The rest of the logic from original handleMouseClick
+		contentX := msg.X - sidebarW - 2 // 2 for border and padding
+		clickedLineNum := v.scrollOffset + clickedViewportLine
+		if clickedLineNum >= len(v.content.Lines) {
+			return v, nil
+		}
+		clickedLine := v.content.Lines[clickedLineNum]
+
 		if option := v.extractOptionAtPosition(clickedLine, contentX); option != "" {
-			// Find the section that matches this option
 			if sectionIdx := v.findSectionByOption(option); sectionIdx != -1 {
-				// Jump to the section in content pane
 				section := v.content.Sections[sectionIdx]
 				v.scrollOffset = section.StartLine
-				v.contentCursor = 0 // Reset cursor to top of viewport
-
-				// Ensure we don't scroll past the end
-				maxScroll := len(v.content.Lines) - v.viewportHeight()
-				if maxScroll < 0 {
-					maxScroll = 0
-				}
-				if v.scrollOffset > maxScroll {
-					v.scrollOffset = maxScroll
+				v.contentCursor = 0
+				if v.scrollOffset < 0 {
+					v.scrollOffset = 0
 				}
 
-				// Also update the sidebar cursor to highlight this option
 				displayedIndices := v.getDisplayedSectionIndices()
 				for i, idx := range displayedIndices {
 					if idx == sectionIdx {
@@ -1407,9 +1408,33 @@ func (v Viewer) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
-
-				v.focusPane = paneContent
 			}
+		}
+
+	} else {
+		// --- Clicked in Sections Pane ---
+		v.focusPane = paneSections
+
+		sections := v.content.ManSections
+		if len(sections) == 0 {
+			return v, nil
+		}
+
+		// Calculate clicked item index
+		// The right pane is not scrollable, so index is just the line number
+		clickedItemIndex := clickedViewportLine
+		if clickedItemIndex >= 0 && clickedItemIndex < len(sections) {
+			v.sectionCursor = clickedItemIndex
+
+			// Jump to selected section
+			section := sections[v.sectionCursor]
+			v.scrollOffset = section.StartLine
+			v.contentCursor = 0 // Reset cursor to top of viewport
+			if v.scrollOffset < 0 {
+				v.scrollOffset = 0
+			}
+			// Switch to content pane after jumping
+			v.focusPane = paneContent
 		}
 	}
 
