@@ -1,4 +1,4 @@
-package main
+package parse
 
 import (
 	"bytes"
@@ -216,7 +216,7 @@ func (s Section) MatchesQuery(query string) bool {
 // excluding any description text that may follow.
 // e.g., "-F      Display a slash..." -> "-F"
 // e.g., "-r, --recursive   Copy recursively" -> "-r, --recursive"
-func extractOptionFlags(option string) string {
+func ExtractOptionFlags(option string) string {
 	// Options are typically separated from description by multiple spaces
 	// Find where the description starts (2+ consecutive spaces)
 	for i := 0; i < len(option)-1; i++ {
@@ -234,7 +234,7 @@ func (s Section) MatchesOption(query string) bool {
 	if query == "" {
 		return true
 	}
-	flags := extractOptionFlags(s.Option)
+	flags := ExtractOptionFlags(s.Option)
 	return strings.Contains(strings.ToLower(flags), strings.ToLower(query))
 }
 
@@ -245,7 +245,7 @@ func (s Section) MatchesOptionExact(query string) bool {
 	if query == "" {
 		return true
 	}
-	flags := extractOptionFlags(s.Option)
+	flags := ExtractOptionFlags(s.Option)
 	queryNorm := strings.TrimLeft(query, "-")
 
 	// Split flags by comma and whitespace to get individual options

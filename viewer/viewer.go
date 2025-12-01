@@ -1,4 +1,4 @@
-package main
+package viewer
 
 import (
 	"fmt"
@@ -7,49 +7,56 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/shadyabhi/mantee/man/parse"
+	"github.com/shadyabhi/mantee/man/search"
 )
 
-// ViewerMode represents the current mode of the viewer
-type ViewerMode int
-
-const (
-	ModeNormal        ViewerMode = iota // Normal viewing mode
-	ModeSearch                          // Search/command input mode
-	ModeSectionSelect                   // Section selector modal
-	ModeHelp                            // Help/shortcuts modal
+var (
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
 )
 
-// SearchType represents what field to search in
-type SearchType int
+// viewerMode represents the current mode of the viewer
+type viewerMode int
 
 const (
-	SearchAll         SearchType = iota // Search both option and description
-	SearchOption                        // Search option only (partial match)
-	SearchOptionExact                   // Search option only (exact match)
-	SearchDescription                   // Search description only
+	modeNormal        viewerMode = iota // Normal viewing mode
+	modeSearch                          // Search/command input mode
+	modeSectionSelect                   // Section selector modal
+	modeHelp                            // Help/shortcuts modal
 )
 
-// FocusPane represents which pane is currently focused
-type FocusPane int
+// searchType represents what field to search in
+type searchType int
 
 const (
-	PaneSidebar  FocusPane = iota // Left sidebar with options list
-	PaneContent                   // Center content pane
-	PaneSections                  // Right sidebar with man sections
-	PaneCount                     // Total number of panes (must be last)
+	searchAll         searchType = iota // Search both option and description
+	searchOption                        // Search option only (partial match)
+	searchOptionExact                   // Search option only (exact match)
+	searchDescription                   // Search description only
+)
+
+// focusPane represents which pane is currently focused
+type focusPane int
+
+const (
+	paneSidebar  focusPane = iota // Left sidebar with options list
+	paneContent                   // Center content pane
+	paneSections                  // Right sidebar with man sections
+	paneCount                     // Total number of panes (must be last)
 )
 
 // Viewer is the Bubble Tea model for the man page viewer
 type Viewer struct {
-	content             *ManPageContent
-	manPage             ManPage
-	mode                ViewerMode
-	focusPane           FocusPane  // Which pane is currently focused
+	content             *parse.ManPageContent
+	manPage             search.ManPage
+	mode                viewerMode
+	focusPane           focusPane  // Which pane is currently focused
 	sidebarCursor       int        // Current selection in the sidebar
 	sidebarScrollOffset int        // Scroll offset for sidebar
 	searchInput         string
 	searchQuery         string     // Current active search query
-	searchType          SearchType // What to search (all, option, description)
+	searchType          searchType // What to search (all, option, description)
 	filteredIndices     []int      // Indices of sections matching the search (for option/desc search)
 	matchingLines       []int      // Line numbers matching the search (for full-text search)
 	currentMatch        int        // Current match index when navigating
@@ -63,13 +70,13 @@ type Viewer struct {
 	sectionScrollOffset int // Scroll offset for section selector
 }
 
-// NewViewer creates a new Viewer for the given man page
-func NewViewer(page ManPage, content *ManPageContent) Viewer {
+// New creates a new Viewer for the given man page
+func New(page search.ManPage, content *parse.ManPageContent) Viewer {
 	return Viewer{
 		content:   content,
 		manPage:   page,
-		mode:      ModeNormal,
-		focusPane: PaneContent,
+		mode:      modeNormal,
+		focusPane: paneContent,
 		width:     80,
 		height:    24,
 	}
@@ -97,13 +104,13 @@ func (v Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch v.mode {
-		case ModeNormal:
+		case modeNormal:
 			return v.updateNormal(msg)
-		case ModeSearch:
+		case modeSearch:
 			return v.updateSearch(msg)
-		case ModeSectionSelect:
+		case modeSectionSelect:
 			return v.updateSectionSelect(msg)
-		case ModeHelp:
+		case modeHelp:
 			return v.updateHelp(msg)
 		}
 	}
@@ -119,40 +126,40 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "tab":
 		// Cycle through panes forward
-		v.focusPane = (v.focusPane + 1) % PaneCount
+		v.focusPane = (v.focusPane + 1) % paneCount
 		return v, nil
 
 	case "shift+tab":
 		// Cycle through panes backward
-		v.focusPane = (v.focusPane + PaneCount - 1) % PaneCount
+		v.focusPane = (v.focusPane + paneCount - 1) % paneCount
 		return v, nil
 
 	case "/":
 		// Enter search mode (search all)
-		v.mode = ModeSearch
+		v.mode = modeSearch
 		v.searchInput = ""
-		v.searchType = SearchAll
+		v.searchType = searchAll
 		return v, nil
 
 	case "o":
 		// Enter search mode (option only, partial match)
-		v.mode = ModeSearch
+		v.mode = modeSearch
 		v.searchInput = ""
-		v.searchType = SearchOption
+		v.searchType = searchOption
 		return v, nil
 
 	case "O":
 		// Enter search mode (option only, exact match)
-		v.mode = ModeSearch
+		v.mode = modeSearch
 		v.searchInput = ""
-		v.searchType = SearchOptionExact
+		v.searchType = searchOptionExact
 		return v, nil
 
 	case "d":
 		// Enter search mode (description only)
-		v.mode = ModeSearch
+		v.mode = modeSearch
 		v.searchInput = ""
-		v.searchType = SearchDescription
+		v.searchType = searchDescription
 		return v, nil
 
 	case "esc":
@@ -171,7 +178,7 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if matchCount > 0 {
 			v.currentMatch = (v.currentMatch + 1) % matchCount
 			v.scrollToCurrentMatch()
-			v.focusPane = PaneContent
+			v.focusPane = paneContent
 		}
 		return v, nil
 
@@ -184,14 +191,14 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				v.currentMatch = matchCount - 1
 			}
 			v.scrollToCurrentMatch()
-			v.focusPane = PaneContent
+			v.focusPane = paneContent
 		}
 		return v, nil
 
 	case "G":
 		// Open section selector modal
 		if len(v.content.ManSections) > 0 {
-			v.mode = ModeSectionSelect
+			v.mode = modeSectionSelect
 			v.sectionCursor = 0
 			v.sectionScrollOffset = 0
 		}
@@ -199,15 +206,15 @@ func (v Viewer) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		// Open help modal
-		v.mode = ModeHelp
+		v.mode = modeHelp
 		return v, nil
 	}
 
 	// Pane-specific keys
 	switch v.focusPane {
-	case PaneSidebar:
+	case paneSidebar:
 		return v.updateSidebar(msg)
-	case PaneSections:
+	case paneSections:
 		return v.updateSections(msg)
 	default:
 		return v.updateContent(msg)
@@ -248,7 +255,7 @@ func (v Viewer) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			v.scrollOffset = maxScroll
 		}
 		// Switch to content pane after jumping
-		v.focusPane = PaneContent
+		v.focusPane = paneContent
 		return v, nil
 
 	case "home":
@@ -368,12 +375,12 @@ func (v Viewer) updateContent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "left", "h":
 		// Switch to sidebar
-		v.focusPane = PaneSidebar
+		v.focusPane = paneSidebar
 		return v, nil
 
 	case "right", "l":
 		// Switch to sections pane
-		v.focusPane = PaneSections
+		v.focusPane = paneSections
 		return v, nil
 	}
 	return v, nil
@@ -411,7 +418,7 @@ func (v Viewer) updateSections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if v.scrollOffset > maxScroll {
 			v.scrollOffset = maxScroll
 		}
-		v.focusPane = PaneContent
+		v.focusPane = paneContent
 		return v, nil
 
 	case "home":
@@ -424,7 +431,7 @@ func (v Viewer) updateSections(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "left", "h":
 		// Switch to content pane
-		v.focusPane = PaneContent
+		v.focusPane = paneContent
 		return v, nil
 	}
 	return v, nil
@@ -439,7 +446,7 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		// Cancel search, go back to normal mode
-		v.mode = ModeNormal
+		v.mode = modeNormal
 		v.searchInput = ""
 		return v, nil
 
@@ -450,7 +457,7 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Reset sidebar cursor and scroll for filtered view
 		v.sidebarCursor = 0
 		v.sidebarScrollOffset = 0
-		if v.searchType == SearchAll {
+		if v.searchType == searchAll {
 			// Full-text search across all lines
 			v.matchingLines = v.findMatchingLines()
 			v.filteredIndices = nil
@@ -465,8 +472,8 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				v.scrollToCurrentMatch()
 			}
 		}
-		v.mode = ModeNormal
-		v.focusPane = PaneContent // Keep focus on content pane after search
+		v.mode = modeNormal
+		v.focusPane = paneContent // Keep focus on content pane after search
 		return v, nil
 
 	case "backspace":
@@ -487,7 +494,7 @@ func (v Viewer) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	sections := v.content.ManSections
 	if len(sections) == 0 {
-		v.mode = ModeNormal
+		v.mode = modeNormal
 		return v, nil
 	}
 
@@ -498,7 +505,7 @@ func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc", "g":
 		// Close section selector
-		v.mode = ModeNormal
+		v.mode = modeNormal
 		return v, nil
 
 	case "up", "k":
@@ -526,8 +533,8 @@ func (v Viewer) updateSectionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if v.scrollOffset > maxScroll {
 			v.scrollOffset = maxScroll
 		}
-		v.mode = ModeNormal
-		v.focusPane = PaneContent
+		v.mode = modeNormal
+		v.focusPane = paneContent
 		return v, nil
 
 	case "home":
@@ -551,7 +558,7 @@ func (v Viewer) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc", "?", "q":
 		// Close help modal
-		v.mode = ModeNormal
+		v.mode = modeNormal
 		return v, nil
 	}
 	return v, nil
@@ -587,11 +594,11 @@ func (v Viewer) findMatchingSections() []int {
 	for i, section := range v.content.Sections {
 		var matches bool
 		switch v.searchType {
-		case SearchOption:
+		case searchOption:
 			matches = section.MatchesOption(v.searchQuery)
-		case SearchOptionExact:
+		case searchOptionExact:
 			matches = section.MatchesOptionExact(v.searchQuery)
-		case SearchDescription:
+		case searchDescription:
 			matches = section.MatchesDescription(v.searchQuery)
 		default:
 			matches = section.MatchesQuery(v.searchQuery)
@@ -792,7 +799,7 @@ func (v Viewer) renderSidebar() string {
 
 	// Sidebar styles
 	var borderColor, titleBg lipgloss.Color
-	if v.focusPane == PaneSidebar {
+	if v.focusPane == paneSidebar {
 		borderColor = lipgloss.Color("212") // Pink when focused
 		titleBg = lipgloss.Color("62")      // Brighter purple when focused
 	} else {
@@ -831,7 +838,7 @@ func (v Viewer) renderSidebar() string {
 			sectionIdx := displayedIndices[displayIdx]
 			section := v.content.Sections[sectionIdx]
 			// Extract only the option flags, not the description
-			optFlags := extractOptionFlags(section.Option)
+			optFlags := parse.ExtractOptionFlags(section.Option)
 			opt := truncateOption(optFlags, sidebarW-4)
 			if displayIdx == v.sidebarCursor {
 				line = sidebarSelectedStyle.Render("> " + opt)
@@ -927,9 +934,9 @@ func (v Viewer) highlightSearchTerm(line string) string {
 		return line
 	}
 
-	// Only highlight search term for full-text search (SearchAll)
+	// Only highlight search term for full-text search (searchAll)
 	// For option/description searches, we filter sections but don't highlight the term in content
-	if v.searchType != SearchAll {
+	if v.searchType != searchAll {
 		return line
 	}
 
@@ -976,7 +983,7 @@ func (v Viewer) renderContent() string {
 
 	// Content pane border and title color based on focus
 	var borderColor, titleBg lipgloss.Color
-	if v.focusPane == PaneContent {
+	if v.focusPane == paneContent {
 		borderColor = lipgloss.Color("212") // Pink when focused
 		titleBg = lipgloss.Color("62")      // Brighter purple when focused
 	} else {
@@ -1048,7 +1055,7 @@ func (v Viewer) renderContent() string {
 				highlightedLine += strings.Repeat(" ", padding)
 			}
 			b.WriteString("  " + matchingLineStyle.Render(highlightedLine))
-		} else if v.focusPane == PaneContent && i == v.contentCursor {
+		} else if v.focusPane == paneContent && i == v.contentCursor {
 			// Highlight the cursor line when content pane is focused
 			// Highlight clickable options first, then add background for cursor line
 			highlightedLine := v.highlightClickableOptions(line)
@@ -1093,7 +1100,7 @@ func (v Viewer) renderSectionsPane() string {
 
 	// When focused, use sectionCursor; otherwise show current viewing section
 	var highlightIdx int
-	if v.focusPane == PaneSections {
+	if v.focusPane == paneSections {
 		highlightIdx = v.sectionCursor
 	} else {
 		highlightIdx = v.currentManSectionIndex()
@@ -1101,7 +1108,7 @@ func (v Viewer) renderSectionsPane() string {
 
 	// Sections pane border and title color based on focus
 	var borderColor, titleBg lipgloss.Color
-	if v.focusPane == PaneSections {
+	if v.focusPane == paneSections {
 		borderColor = lipgloss.Color("212") // Pink when focused
 		titleBg = lipgloss.Color("62")      // Brighter purple when focused
 	} else {
@@ -1332,7 +1339,7 @@ func (v Viewer) renderHelpModal() string {
 // handleMouseClick processes mouse click events
 func (v Viewer) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Only handle clicks in normal mode
-	if v.mode != ModeNormal {
+	if v.mode != modeNormal {
 		return v, nil
 	}
 
@@ -1401,7 +1408,7 @@ func (v Viewer) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				v.focusPane = PaneContent
+				v.focusPane = paneContent
 			}
 		}
 	}
@@ -1561,11 +1568,11 @@ func (v Viewer) View() string {
 		}
 		var searchPrefix string
 		switch v.searchType {
-		case SearchOption:
+		case searchOption:
 			searchPrefix = "option:"
-		case SearchOptionExact:
+		case searchOptionExact:
 			searchPrefix = "option(exact):"
-		case SearchDescription:
+		case searchDescription:
 			searchPrefix = "desc:"
 		default:
 			searchPrefix = "search:"
@@ -1589,10 +1596,10 @@ func (v Viewer) View() string {
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content, sectionsPane)
 
 	// Overlay modal if in section select or help mode
-	if v.mode == ModeSectionSelect {
+	if v.mode == modeSectionSelect {
 		modal := v.renderSectionModal()
 		mainArea = v.overlayModal(mainArea, modal)
-	} else if v.mode == ModeHelp {
+	} else if v.mode == modeHelp {
 		modal := v.renderHelpModal()
 		mainArea = v.overlayModal(mainArea, modal)
 	}
@@ -1603,14 +1610,14 @@ func (v Viewer) View() string {
 	// Command line / status bar
 	var cmdLine string
 	switch v.mode {
-	case ModeSearch:
+	case modeSearch:
 		var prefix string
 		switch v.searchType {
-		case SearchOption:
+		case searchOption:
 			prefix = "o:"
-		case SearchOptionExact:
+		case searchOptionExact:
 			prefix = "O:"
-		case SearchDescription:
+		case searchDescription:
 			prefix = "d:"
 		default:
 			prefix = "/"
@@ -1619,15 +1626,15 @@ func (v Viewer) View() string {
 			Bold(true).
 			Foreground(lipgloss.Color("212")).
 			Render(prefix) + v.searchInput + "█"
-	case ModeNormal:
+	case modeNormal:
 		if v.searchQuery != "" {
 			cmdLine = helpStyle.Render("n next • N prev • esc clear • tab switch • G sections • ? help • q quit")
 		} else {
 			cmdLine = helpStyle.Render("tab switch • ↑↓ navigate • enter select • G sections • ? help • q quit")
 		}
-	case ModeSectionSelect:
+	case modeSectionSelect:
 		cmdLine = helpStyle.Render("↑↓ navigate • enter jump • esc/G close")
-	case ModeHelp:
+	case modeHelp:
 		cmdLine = helpStyle.Render("Press ?, esc, or q to close")
 	}
 	cmdLineBar := lipgloss.NewStyle().

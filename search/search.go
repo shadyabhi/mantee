@@ -1,10 +1,11 @@
-package main
+package search
 
 import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/shadyabhi/mantee/man/search"
 )
 
 var (
@@ -31,22 +32,22 @@ var (
 			Foreground(lipgloss.Color("196"))
 )
 
-// UIState represents the current state of the UI
-type UIState int
+// uiState represents the current state of the UI
+type uiState int
 
 const (
-	StateInput    UIState = iota // Text input for search term
-	StateSelect                  // Selection list for results
+	stateInput  uiState = iota // Text input for search term
+	stateSelect                // Selection list for results
 )
 
-// Model represents the Bubble Tea model
+// Model represents the Bubble Tea model for search/selection UI
 type Model struct {
-	state        UIState
+	state        uiState
 	input        string
-	pages        []ManPage
+	pages        []search.ManPage
 	cursor       int
 	scrollOffset int // Scroll offset for viewport
-	selected     *ManPage
+	selected     *search.ManPage
 	quitting     bool
 	keyword      string
 	err          string
@@ -54,17 +55,17 @@ type Model struct {
 	height       int
 }
 
-// NewInputModel creates a new Model starting with text input
-func NewInputModel() Model {
+// New creates a new Model starting with text input
+func New() Model {
 	return Model{
-		state: StateInput,
+		state: stateInput,
 	}
 }
 
-// NewSelectModel creates a new Model starting with selection (when keyword provided via CLI)
-func NewSelectModel(keyword string, pages []ManPage) Model {
+// NewWithResults creates a new Model starting with selection (when keyword provided via CLI)
+func NewWithResults(keyword string, pages []search.ManPage) Model {
 	return Model{
-		state:   StateSelect,
+		state:   stateSelect,
 		pages:   pages,
 		cursor:  0,
 		keyword: keyword,
@@ -85,9 +86,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		switch m.state {
-		case StateInput:
+		case stateInput:
 			return m.updateInput(msg)
-		case StateSelect:
+		case stateSelect:
 			return m.updateSelect(msg)
 		}
 	}
@@ -105,7 +106,7 @@ func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Search for man pages
-		pages, err := SearchManPages(m.input)
+		pages, err := search.SearchManPages(m.input)
 		if err != nil {
 			m.err = fmt.Sprintf("Error searching: %v", err)
 			return m, nil
@@ -115,7 +116,7 @@ func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Transition to selection state
-		m.state = StateSelect
+		m.state = stateSelect
 		m.keyword = m.input
 		m.pages = pages
 		m.cursor = 0
@@ -201,9 +202,9 @@ func (m Model) View() string {
 	}
 
 	switch m.state {
-	case StateInput:
+	case stateInput:
 		return m.viewInput()
-	case StateSelect:
+	case stateSelect:
 		return m.viewSelect()
 	}
 	return ""
@@ -246,6 +247,6 @@ func (m Model) viewSelect() string {
 }
 
 // Selected returns the selected man page, or nil if none selected
-func (m Model) Selected() *ManPage {
+func (m Model) Selected() *search.ManPage {
 	return m.selected
 }

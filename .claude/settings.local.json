@@ -17,7 +17,9 @@
       "Bash(git tag:*)",
       "Bash(git push:*)",
       "Bash(jj status:*)",
-      "Bash(jj log:*)"
+      "Bash(jj log:*)",
+      "Bash(tree:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []
